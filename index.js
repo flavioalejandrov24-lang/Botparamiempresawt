@@ -15,9 +15,29 @@ const pino = require("pino");
 const http = require("http");
 const nodemailer = require("nodemailer");
  
-// Servidor HTTP
-http.createServer((req, res) => res.end("Bot activo")).listen(process.env.PORT || 4000);
- 
+// ============================================================
+// SERVIDOR HTTP MEJORADO CON KEEP-ALIVE
+// ============================================================
+const PORT = process.env.PORT || 4000;
+
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(`✅ Bot Axellabottechnology Activo\n🕐 ${new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })}`);
+}).listen(PORT);
+
+console.log(`🌐 Servidor HTTP iniciado en puerto ${PORT}`);
+
+// Sistema de Keep-Alive para evitar suspensión en Render
+setInterval(() => {
+    http.get(`http://localhost:${PORT}`, (res) => {
+        if (res.statusCode === 200) {
+            console.log(`💚 Keep-alive OK [${new Date().toLocaleTimeString('es-MX')}]`);
+        }
+    }).on('error', (err) => {
+        console.error('❌ Keep-alive error:', err.message);
+    });
+}, 10 * 60 * 1000); // Cada 10 minutos
+
 // Configuración de IA Gemma
 const GEMMA_API_URL = "https://alejandrott24-mi-gemma-servidor.hf.space/preguntar";
  
@@ -141,7 +161,7 @@ async function askGemma(mensaje) {
     try {
         const response = await axios.get(GEMMA_API_URL, {
             params: { mensaje },
-            timeout: 30000 // Aumentado a 30 segundos
+            timeout: 30000
         });
         
         return response.data.respuesta || "Lo siento, no pude procesar tu mensaje.";
@@ -293,7 +313,7 @@ const WELCOME_OPTIONS = {
          newState: STATE_SUBMENU
      },
      5: {
-         response: null, // Se maneja de forma especial (reenvía saludo completo)
+         response: null,
          newState: STATE_WELCOME
      }
 };
@@ -330,197 +350,259 @@ const MENU_OPTIONS = {
 };
  
 // ============================================================
-// FUNCIÓN PRINCIPAL DE CONEXIÓN A WHATSAPP
+// SISTEMA DE RECONEXIÓN INTELIGENTE
+// ============================================================
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 15;
+const BASE_RECONNECT_DELAY = 5000; // 5 segundos inicial
+
+function getReconnectDelay() {
+    // Backoff exponencial con límite máximo de 2 minutos
+    const delay = Math.min(
+        BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts),
+        120000
+    );
+    return delay;
+}
+
+// ============================================================
+// FUNCIÓN PRINCIPAL DE CONEXIÓN A WHATSAPP (MEJORADA)
 // ============================================================
  
 async function connectToWhatsApp() {
-    console.clear();
-    console.log("🚀 Iniciando Sistema Axellabottechnology...\n");
- 
-    const { state, saveCreds } = await useMultiFileAuthState("auth_info");
-    const logger = pino({ level: 'fatal' }, pino.destination('./baileys_logs.log'));
-    const { version } = await fetchLatestBaileysVersion();
- 
-    console.log("📦 Versión WhatsApp Web:", version);
- 
-    const sock = makeWASocket({
-        version,
-        auth: state,
-        logger,
-        printQRInTerminal: false,
-        syncFullHistory: false,
-        browser: ['Axellabottechnology', 'Chrome', '1.0.0'],
-        getMessage: async () => undefined,
-        markOnlineOnConnect: false,
-        emitOwnEvents: false,
-        fireInitQueries: false
-    });
-    
-    console.log("✅ Logger configurado - Logs de Baileys → ./baileys_logs.log");
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
- 
-    sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect, qr } = update;
-         
-        if(connection) console.log("📡 Estado:", connection);
- 
-        if (qr) {
-            console.log("\n📱 Escanea este QR en terminal:");
-            qrcode.generate(qr, { small: true });
-        }
- 
-        if (connection === "open" && sock.user?.id) {
-            let cleaned = sock.user.id.replace(/:[0-9]+/, "");
-            if (cleaned.startsWith("521")) cleaned = cleaned.replace("521", "52");
-            console.log("\n✅ 🤖 Bot conectado como:", cleaned.split("@")[0]);
-            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            
-            scheduleMessages(sock);
-        }
- 
-        if (connection === "close") {
-            const code = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = code !== 401;
+    try {
+        console.clear();
+        console.log("🚀 Iniciando Sistema Axellabottechnology...\n");
+     
+        const { state, saveCreds } = await useMultiFileAuthState("auth_info");
+        const logger = pino({ level: 'fatal' }, pino.destination('./baileys_logs.log'));
+        const { version } = await fetchLatestBaileysVersion();
+     
+        console.log("📦 Versión WhatsApp Web:", version);
+     
+        const sock = makeWASocket({
+            version,
+            auth: state,
+            logger,
+            printQRInTerminal: false,
+            syncFullHistory: false,
+            browser: ['Axellabottechnology', 'Chrome', '1.0.0'],
+            getMessage: async () => undefined,
+            markOnlineOnConnect: false,
+            emitOwnEvents: false,
+            fireInitQueries: false,
+            // NUEVAS OPCIONES DE ESTABILIDAD
+            connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 60000,
+            keepAliveIntervalMs: 25000,
+            qrTimeout: 60000,
+            retryRequestDelayMs: 2000
+        });
+        
+        console.log("✅ Logger configurado - Logs de Baileys → ./baileys_logs.log");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+     
+        sock.ev.on("connection.update", (update) => {
+            const { connection, lastDisconnect, qr } = update;
              
-            if (shouldReconnect) {
-                console.log("🔄 Conexión caída. Reiniciando en 5 segundos...");
-                setTimeout(connectToWhatsApp, 5000);
-            } else {
-                console.log("⚠️ Sesión cerrada (Logout). Borra 'auth_info' para re-escanear.");
+            if(connection) console.log("📡 Estado:", connection);
+     
+            if (qr) {
+                console.log("\n📱 Escanea este QR en terminal:");
+                qrcode.generate(qr, { small: true });
             }
-        }
-    });
- 
-    sock.ev.on("creds.update", saveCreds);
- 
-    sock.ev.on("messages.upsert", async ({ messages, type }) => {
-         
-        if (type !== "notify") return;
- 
-        const m = messages[0];
-        if (!m.message || m.key.fromMe) return;
- 
-        const remoteJid = m.key.remoteJid;
-        if (remoteJid.endsWith("@g.us") || remoteJid.includes("@newsletter")) return;
-        if (m.message.protocolMessage || m.message.senderKeyDistributionMessage) return;
- 
-        if (processedMessages.has(m.key.id)) return;
-        processedMessages.add(m.key.id);
-        setTimeout(() => processedMessages.delete(m.key.id), 60 * 1000);
- 
-        let text = m.message.conversation ||
-                   m.message.extendedTextMessage?.text ||
-                   m.message.imageMessage?.caption ||
-                   m.message.videoMessage?.caption || "";
-         
-        if (!text || text.trim().length === 0) return;
- 
-        text = text.replace(/^@\d+\s*/g, "").trim();
-         
-        if (cooldowns.has(remoteJid) && Date.now() < cooldowns.get(remoteJid)) return;
-         
-        const currentState = userStates.get(remoteJid);
-        const normalized = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const remoteNumber = remoteJid.split('@')[0];
- 
-        // ============================================================
-        // NUEVO USUARIO - ENVIAR SALUDO INICIAL
-        // ============================================================
-        if (currentState === undefined) {
-            userStates.set(remoteJid, STATE_WELCOME);
-            console.log(`👤 Nuevo usuario: ${remoteNumber}`);
-            
-            await sendWelcomeGreeting(sock, remoteJid);
-            return;
-        }
-
-        // ============================================================
-        // MENU DE BIENVENIDA (CAPA 1)
-        // ============================================================
-        if (currentState === STATE_WELCOME) {
-            const welcomeMatch = text.trim().match(/^[1-5]$/);
-            if (welcomeMatch) {
-                const option = parseInt(welcomeMatch[0]);
-                const selectedOption = WELCOME_OPTIONS[option];
-
-                if (!selectedOption) return;
-
-                // Caso especial: Opción 5 (Reenviar saludo)
-                if (option === 5) {
-                    console.log(`🔄 Usuario [${remoteNumber}] solicitó reenvío de saludo`);
-                    await sendWelcomeGreeting(sock, remoteJid);
+     
+            if (connection === "open" && sock.user?.id) {
+                // Resetear contador de intentos al conectar exitosamente
+                reconnectAttempts = 0;
+                
+                let cleaned = sock.user.id.replace(/:[0-9]+/, "");
+                if (cleaned.startsWith("521")) cleaned = cleaned.replace("521", "52");
+                console.log("\n✅ 🤖 Bot conectado como:", cleaned.split("@")[0]);
+                console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+                
+                scheduleMessages(sock);
+            }
+     
+            if (connection === "close") {
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const endpointStatusCode = lastDisconnect?.error?.output?.payload?.statusCode;
+                
+                console.log(`\n⚠️ Desconexión detectada`);
+                console.log(`   └─ Status Code: ${statusCode || 'N/A'}`);
+                console.log(`   └─ Endpoint Code: ${endpointStatusCode || 'N/A'}`);
+                
+                // Códigos que NO deben reconectar
+                const doNotReconnect = [401, 403, 428, 515];
+                const shouldReconnect = !doNotReconnect.includes(statusCode) && 
+                                       reconnectAttempts < MAX_RECONNECT_ATTEMPTS;
+                 
+                if (shouldReconnect) {
+                    reconnectAttempts++;
+                    const delay = getReconnectDelay();
+                    
+                    console.log(`🔄 Intento de reconexión ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+                    console.log(`   └─ Esperando ${(delay/1000).toFixed(1)}s antes de reconectar...\n`);
+                    
+                    setTimeout(connectToWhatsApp, delay);
+                } else {
+                    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                        console.log("⛔ Máximo de intentos de reconexión alcanzado.");
+                        console.log("   └─ Revisa la conexión y reinicia manualmente si es necesario.\n");
+                    } else {
+                        console.log("⚠️ Sesión cerrada definitivamente (Código: " + statusCode + ")");
+                        
+                        // Limpiar sesión corrupta para códigos específicos
+                        if ([403, 428, 515].includes(statusCode)) {
+                            console.log("🗑️ Limpiando sesión corrupta...");
+                            try {
+                                const path = require('path');
+                                fs.rmSync(path.join(__dirname, 'auth_info'), { 
+                                    recursive: true, 
+                                    force: true 
+                                });
+                                console.log("✅ Sesión limpiada. Reinicia el bot para escanear QR nuevamente.\n");
+                            } catch (e) {
+                                console.error("❌ Error limpiando auth:", e.message);
+                            }
+                        } else {
+                            console.log("   └─ Borra la carpeta 'auth_info' para re-escanear QR.\n");
+                        }
+                    }
+                }
+            }
+        });
+     
+        sock.ev.on("creds.update", saveCreds);
+     
+        sock.ev.on("messages.upsert", async ({ messages, type }) => {
+             
+            if (type !== "notify") return;
+     
+            const m = messages[0];
+            if (!m.message || m.key.fromMe) return;
+     
+            const remoteJid = m.key.remoteJid;
+            if (remoteJid.endsWith("@g.us") || remoteJid.includes("@newsletter")) return;
+            if (m.message.protocolMessage || m.message.senderKeyDistributionMessage) return;
+     
+            if (processedMessages.has(m.key.id)) return;
+            processedMessages.add(m.key.id);
+            setTimeout(() => processedMessages.delete(m.key.id), 60 * 1000);
+     
+            let text = m.message.conversation ||
+                       m.message.extendedTextMessage?.text ||
+                       m.message.imageMessage?.caption ||
+                       m.message.videoMessage?.caption || "";
+             
+            if (!text || text.trim().length === 0) return;
+     
+            text = text.replace(/^@\d+\s*/g, "").trim();
+             
+            if (cooldowns.has(remoteJid) && Date.now() < cooldowns.get(remoteJid)) return;
+             
+            const currentState = userStates.get(remoteJid);
+            const normalized = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            const remoteNumber = remoteJid.split('@')[0];
+     
+            // ============================================================
+            // NUEVO USUARIO - ENVIAR SALUDO INICIAL
+            // ============================================================
+            if (currentState === undefined) {
+                userStates.set(remoteJid, STATE_WELCOME);
+                console.log(`👤 Nuevo usuario: ${remoteNumber}`);
+                
+                await sendWelcomeGreeting(sock, remoteJid);
+                return;
+            }
+    
+            // ============================================================
+            // MENU DE BIENVENIDA (CAPA 1)
+            // ============================================================
+            if (currentState === STATE_WELCOME) {
+                const welcomeMatch = text.trim().match(/^[1-5]$/);
+                if (welcomeMatch) {
+                    const option = parseInt(welcomeMatch[0]);
+                    const selectedOption = WELCOME_OPTIONS[option];
+    
+                    if (!selectedOption) return;
+    
+                    // Caso especial: Opción 5 (Reenviar saludo)
+                    if (option === 5) {
+                        console.log(`🔄 Usuario [${remoteNumber}] solicitó reenvío de saludo`);
+                        await sendWelcomeGreeting(sock, remoteJid);
+                        return;
+                    }
+    
+                    userStates.set(remoteJid, selectedOption.newState);
+                    
+                    try {
+                        await sock.sendMessage(remoteJid, { text: selectedOption.response });
+                        return;
+                    } catch (err) {
+                        console.error("❌ Error enviando opción bienvenida:", err);
+                        return;
+                    }
+                }
+            }
+    
+            // ============================================================
+            // MENU PRINCIPAL (CAPA 2)
+            // ============================================================
+            const optionMatch = text.trim().match(/^[0-5]$/);
+            if (optionMatch) {
+                const option = parseInt(optionMatch[0]);
+                const selectedOption = MENU_OPTIONS[option];
+    
+                if ((currentState === STATE_SUBMENU || currentState === STATE_RECADO || currentState === STATE_CITA || currentState === STATE_ASESOR_REAL) && option !== 0) {
+                    await sock.sendMessage(remoteJid, { text: ERROR_INVALID_SUBMENU });
                     return;
                 }
-
-                userStates.set(remoteJid, selectedOption.newState);
                 
+                if (!selectedOption) return;
+    
+                userStates.set(remoteJid, selectedOption.newState);
+                 
                 try {
                     await sock.sendMessage(remoteJid, { text: selectedOption.response });
                     return;
                 } catch (err) {
-                    console.error("❌ Error enviando opción bienvenida:", err);
+                    console.error("❌ Error enviando opción:", err);
                     return;
                 }
             }
-        }
-
-        // ============================================================
-        // MENU PRINCIPAL (CAPA 2)
-        // ============================================================
-        const optionMatch = text.trim().match(/^[0-5]$/);
-        if (optionMatch) {
-            const option = parseInt(optionMatch[0]);
-            const selectedOption = MENU_OPTIONS[option];
-
-            if ((currentState === STATE_SUBMENU || currentState === STATE_RECADO || currentState === STATE_CITA || currentState === STATE_ASESOR_REAL) && option !== 0) {
-                await sock.sendMessage(remoteJid, { text: ERROR_INVALID_SUBMENU });
+    
+            // ============================================================
+            // COMANDO /MENU
+            // ============================================================
+            if (normalized === "/menú" || normalized === "/menu") {
+                await sock.sendMessage(remoteJid, { text: MENU_BIENVENIDA });
+                userStates.set(remoteJid, STATE_WELCOME);
+                cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
                 return;
             }
-            
-            if (!selectedOption) return;
-
-            userStates.set(remoteJid, selectedOption.newState);
-             
-            try {
-                await sock.sendMessage(remoteJid, { text: selectedOption.response });
-                return;
-            } catch (err) {
-                console.error("❌ Error enviando opción:", err);
-                return;
-            }
-        }
-
-        // ============================================================
-        // COMANDO /MENU
-        // ============================================================
-        if (normalized === "/menú" || normalized === "/menu") {
-            await sock.sendMessage(remoteJid, { text: MENU_BIENVENIDA });
-            userStates.set(remoteJid, STATE_WELCOME);
-            cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
-            return;
-        }
-
-        // ============================================================
-        // ESTADO: RECADO O CITA
-        // ============================================================
-        if (currentState === STATE_RECADO || currentState === STATE_CITA) {
-            
-            if (text.trim().length > 0) {
-                const isRecado = currentState === STATE_RECADO;
-                const subject = isRecado ? "📝 NUEVO RECADO de Cliente" : "🗓️ NUEVA CITA / REUNIÓN Solicitada";
+    
+            // ============================================================
+            // ESTADO: RECADO O CITA
+            // ============================================================
+            if (currentState === STATE_RECADO || currentState === STATE_CITA) {
                 
-                let clientContactNumber = null;
-                const match = text.match(LEON_NUMBER_SEARCH_REGEX);
-                
-                if (match) {
-                    clientContactNumber = match[0].trim();
-                } else {
-                    await sock.sendMessage(remoteJid, { text: ERROR_INVALID_NUMBER });
-                    cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
-                    return;
-                }
-                
-                const body = `
+                if (text.trim().length > 0) {
+                    const isRecado = currentState === STATE_RECADO;
+                    const subject = isRecado ? "📝 NUEVO RECADO de Cliente" : "🗓️ NUEVA CITA / REUNIÓN Solicitada";
+                    
+                    let clientContactNumber = null;
+                    const match = text.match(LEON_NUMBER_SEARCH_REGEX);
+                    
+                    if (match) {
+                        clientContactNumber = match[0].trim();
+                    } else {
+                        await sock.sendMessage(remoteJid, { text: ERROR_INVALID_NUMBER });
+                        cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
+                        return;
+                    }
+                    
+                    const body = `
 ==============================================
 TIPO: ${isRecado ? 'RECADO / MENSAJE' : 'CITA / REUNIÓN'}
 CONTACTO INICIADOR: ${remoteNumber}
@@ -531,82 +613,107 @@ CONTACTO DIRECTO (REQUERIDO): ${clientContactNumber}
 CONTENIDO DEL MENSAJE:
 ${text}
 `;
-
-                await sock.sendPresenceUpdate('composing', remoteJid);
-
-                const success = await sendEmail(subject, body);
-                
-                let replyMessage;
-
-                if (success) {
-                    replyMessage = "✅ *Mensaje/Cita Enviado con Éxito.*\n\nUn agente lo revisará a la brevedad.\n\n" + MENU_RETURN_PROMPT;
+    
+                    await sock.sendPresenceUpdate('composing', remoteJid);
+    
+                    const success = await sendEmail(subject, body);
+                    
+                    let replyMessage;
+    
+                    if (success) {
+                        replyMessage = "✅ *Mensaje/Cita Enviado con Éxito.*\n\nUn agente lo revisará a la brevedad.\n\n" + MENU_RETURN_PROMPT;
+                    } else {
+                        replyMessage = "❌ *Error de Sistema.*\n\nOcurrió un error al enviar su solicitud por correo. Por favor, verifique que la información no esté vacía o pulse *0* para volver al menú principal.\n\n" + MENU_RETURN_PROMPT;
+                    }
+                    
+                    userStates.set(remoteJid, STATE_MAIN);
+                    await sock.sendMessage(remoteJid, { text: replyMessage });
+                    
+                    cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
+                    await sock.sendPresenceUpdate('available', remoteJid);
+                    return;
                 } else {
-                    replyMessage = "❌ *Error de Sistema.*\n\nOcurrió un error al enviar su solicitud por correo. Por favor, verifique que la información no esté vacía o pulse *0* para volver al menú principal.\n\n" + MENU_RETURN_PROMPT;
+                     await sock.sendMessage(remoteJid, { text: ERROR_EMPTY_MESSAGE });
+                     return;
                 }
-                
-                userStates.set(remoteJid, STATE_MAIN);
-                await sock.sendMessage(remoteJid, { text: replyMessage });
-                
-                cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
-                await sock.sendPresenceUpdate('available', remoteJid);
-                return;
-            } else {
-                 await sock.sendMessage(remoteJid, { text: ERROR_EMPTY_MESSAGE });
-                 return;
             }
-        }
-
-        // ============================================================
-        // ESTADO: ASESOR REAL (Solo espera)
-        // ============================================================
-        if (currentState === STATE_ASESOR_REAL) {
-            // No hacer nada, solo esperar a que un humano responda
-            console.log(`⏳ Usuario [${remoteNumber}] esperando asesor real: "${text}"`);
-            return;
-        }
-
-        // ============================================================
-        // ESTADO: SUBMENU (No hacer nada)
-        // ============================================================
-        if (currentState === STATE_SUBMENU) return;
-
-        // ============================================================
-        // ESTADO: MODO GEMMA (IA)
-        // ============================================================
-        if (currentState === STATE_GEMMA_MODE) {
-            
-            if (normalized === "/salir" || normalized === "/menu" || normalized === "/menú") {
-                console.log(`🚪 Usuario [${remoteNumber}] SALIÓ del modo Asistente Virtual`);
-                
-                userStates.set(remoteJid, STATE_WELCOME);
-                chatHistory.delete(remoteJid);
-                
-                await sock.sendMessage(remoteJid, {
-                    text: "✅ Has salido del modo IA.\n\n" + MENU_BIENVENIDA
-                });
-                cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
+    
+            // ============================================================
+            // ESTADO: ASESOR REAL (Solo espera)
+            // ============================================================
+            if (currentState === STATE_ASESOR_REAL) {
+                console.log(`⏳ Usuario [${remoteNumber}] esperando asesor real: "${text}"`);
                 return;
             }
-
-            console.log(`📩 Gemma procesando [${remoteNumber}]: "${text}"`);
-
-            try {
-                await sock.sendPresenceUpdate('composing', remoteJid);
+    
+            // ============================================================
+            // ESTADO: SUBMENU (No hacer nada)
+            // ============================================================
+            if (currentState === STATE_SUBMENU) return;
+    
+            // ============================================================
+            // ESTADO: MODO GEMMA (IA)
+            // ============================================================
+            if (currentState === STATE_GEMMA_MODE) {
                 
-                const reply = await askGemma(text);
-
-                const finalReply = `${reply}\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n💡 *Recuerda:* Este solo es un asistente virtual. Si deseas terminar la conversación solo escribe */salir*`;
-                
-                await sock.sendMessage(remoteJid, { text: finalReply });
-                
-                cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
-                await sock.sendPresenceUpdate('available', remoteJid);
-            } catch (error) {
-                console.error("❌ Error en Gemma:", error.message);
-                await sock.sendMessage(remoteJid, { text: "Lo siento, tuve un problema al procesar tu mensaje. Inténtalo de nuevo." });
+                if (normalized === "/salir" || normalized === "/menu" || normalized === "/menú") {
+                    console.log(`🚪 Usuario [${remoteNumber}] SALIÓ del modo Asistente Virtual`);
+                    
+                    userStates.set(remoteJid, STATE_WELCOME);
+                    chatHistory.delete(remoteJid);
+                    
+                    await sock.sendMessage(remoteJid, {
+                        text: "✅ Has salido del modo IA.\n\n" + MENU_BIENVENIDA
+                    });
+                    cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
+                    return;
+                }
+    
+                console.log(`📩 Gemma procesando [${remoteNumber}]: "${text}"`);
+    
+                try {
+                    await sock.sendPresenceUpdate('composing', remoteJid);
+                    
+                    const reply = await askGemma(text);
+    
+                    const finalReply = `${reply}\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n💡 *Recuerda:* Este solo es un asistente virtual. Si deseas terminar la conversación solo escribe */salir*`;
+                    
+                    await sock.sendMessage(remoteJid, { text: finalReply });
+                    
+                    cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
+                    await sock.sendPresenceUpdate('available', remoteJid);
+                } catch (error) {
+                    console.error("❌ Error en Gemma:", error.message);
+                    await sock.sendMessage(remoteJid, { text: "Lo siento, tuve un problema al procesar tu mensaje. Inténtalo de nuevo." });
+                }
             }
+        });
+        
+    } catch (error) {
+        console.error("💥 Error crítico en connectToWhatsApp:", error);
+        
+        // Intentar reconectar si no se alcanzó el límite
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            const delay = getReconnectDelay();
+            console.log(`🔄 Reintentando conexión en ${(delay/1000).toFixed(1)}s...\n`);
+            setTimeout(connectToWhatsApp, delay);
         }
-    });
+    }
 }
 
-connectToWhatsApp().catch(err => console.error("Error Crítico:", err));
+// ============================================================
+// INICIAR BOT CON MANEJO DE ERRORES GLOBAL
+// ============================================================
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('💥 Uncaught Exception:', error);
+});
+
+connectToWhatsApp().catch(err => {
+    console.error("💥 Error Crítico al iniciar:", err);
+    process.exit(1);
+});
