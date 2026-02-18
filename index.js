@@ -11,16 +11,45 @@ const fs = require('fs');
 const axios = require('axios');
  
 const qrcode = require("qrcode-terminal");
+const QRCode = require("qrcode"); // Para generar imagen QR en navegador
 const pino = require("pino");
 const http = require("http");
 const nodemailer = require("nodemailer");
  
 // ============================================================
-// SERVIDOR HTTP MEJORADO CON KEEP-ALIVE
+// SERVIDOR HTTP MEJORADO CON KEEP-ALIVE + ENDPOINT QR
 // ============================================================
 const PORT = process.env.PORT || 4000;
 
-const server = http.createServer((req, res) => {
+// Variable global para almacenar el último QR recibido
+let latestQRData = null;
+
+const server = http.createServer(async (req, res) => {
+    if (req.url === "/qr") {
+        if (!latestQRData) {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`
+                <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#f0f0f0;">
+                <h2>⏳ QR no disponible aún</h2>
+                <p>El bot ya está conectado o aún no ha generado un QR.</p>
+                <p>Esta página se recargará automáticamente en 5 segundos...</p>
+                <script>setTimeout(()=>location.reload(), 5000);</script>
+                </body></html>
+            `);
+            return;
+        }
+        try {
+            const qrImageBuffer = await QRCode.toBuffer(latestQRData, { scale: 8 });
+            res.writeHead(200, { 'Content-Type': 'image/png' });
+            res.end(qrImageBuffer);
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end("Error generando QR: " + err.message);
+        }
+        return;
+    }
+
+    // Ruta raíz - status del bot
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end(`✅ Bot Axellabottechnology Activo\n🕐 ${new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })}`);
 }).listen(PORT);
@@ -391,7 +420,7 @@ async function connectToWhatsApp() {
             markOnlineOnConnect: false,
             emitOwnEvents: false,
             fireInitQueries: false,
-            // NUEVAS OPCIONES DE ESTABILIDAD
+            // OPCIONES DE ESTABILIDAD
             connectTimeoutMs: 60000,
             defaultQueryTimeoutMs: 60000,
             keepAliveIntervalMs: 25000,
@@ -408,13 +437,23 @@ async function connectToWhatsApp() {
             if(connection) console.log("📡 Estado:", connection);
      
             if (qr) {
+                // Guardar QR para servirlo vía HTTP
+                latestQRData = qr;
+
                 console.log("\n📱 Escanea este QR en terminal:");
                 qrcode.generate(qr, { small: true });
+
+                // Mostrar enlace para escanear desde el navegador
+                const externalUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+                console.log(`\n🌐 ¿No se ve bien el QR? Ábrelo en tu navegador:`);
+                console.log(`   👉  ${externalUrl}/qr\n`);
             }
      
             if (connection === "open" && sock.user?.id) {
                 // Resetear contador de intentos al conectar exitosamente
                 reconnectAttempts = 0;
+                // Limpiar QR ya que no se necesita más
+                latestQRData = null;
                 
                 let cleaned = sock.user.id.replace(/:[0-9]+/, "");
                 if (cleaned.startsWith("521")) cleaned = cleaned.replace("521", "52");
