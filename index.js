@@ -18,8 +18,8 @@ const nodemailer = require("nodemailer");
 // Servidor HTTP
 http.createServer((req, res) => res.end("Bot activo")).listen(process.env.PORT || 4000);
  
-// Configuración de IA Gemma
-const GEMMA_API_URL = "https://alejandrott24-mi-gemma-servidor.hf.space/preguntar";
+// Configuración de IA
+const GEMMA_API_URL = "https://oswaldorios24-mi-gemma-servidor.hf.space/preguntar";
  
 // ============================================================
 // SISTEMA DE MENSAJES PROGRAMADOS AUTOMÁTICOS
