@@ -30,7 +30,7 @@ const TARGET_GROUP_ID = "120363321342714715@g.us";
 const SCHEDULED_TIMES = [
      { hour: 1, minute: 15 },
      { hour: 07, minute: 30 },
-     { hour: 3, minute: 30 }
+     { hour: 3, minute: 55 }
 ];
  
 let messagesSentToday = new Set();
@@ -46,9 +46,6 @@ const SCHEDULED_MESSAGE_TEXT = `📢 *¡REGISTRA TU NEGOCIO!* 📢
 
 🔹 Únete a nuestro canal de WhatsApp:
 https://whatsapp.com/channel/0029Vb638WkBqbrCCtfqDl3b
-
-📝 Ingresa tus datos en nuestro formulario:
-https://docs.google.com/forms/d/e/1FAIpQLScs0piRlqjGgGpTjgErf4qhm1CC87ItHHLf6DvouVydrwq_mQ/viewform?usp=header
 
 ✅ ¡Es rápido y sin costo!`;
  
