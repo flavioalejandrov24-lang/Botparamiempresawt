@@ -29,8 +29,8 @@ const TARGET_GROUP_ID = "120363321342714715@g.us";
  
 const SCHEDULED_TIMES = [
      { hour: 1, minute: 15 },
-     { hour: 16, minute: 30 },
-     { hour: 20, minute: 0 }
+     { hour: 07, minute: 30 },
+     { hour: 3, minute: 30 }
 ];
  
 let messagesSentToday = new Set();
