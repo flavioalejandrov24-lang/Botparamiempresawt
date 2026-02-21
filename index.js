@@ -28,7 +28,7 @@ const GEMMA_API_URL = "https://oswaldorios24-mi-gemma-servidor.hf.space/pregunta
 const TARGET_GROUP_ID = "120363321342714715@g.us";
  
 const SCHEDULED_TIMES = [
-     { hour: 12, minute: 15 },
+     { hour: 1, minute: 15 },
      { hour: 16, minute: 30 },
      { hour: 20, minute: 0 }
 ];
@@ -96,6 +96,8 @@ function scheduleMessages(sock) {
      }, 60000);
  
      console.log("⏰ Mensajes programados activos en los siguientes horarios:");
+     console.log(`🕐 Hora del servidor: ${new Date().toLocaleString('es-MX')}`);
+ 
      SCHEDULED_TIMES.forEach(time => {
          console.log(`     📅 ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')} hrs`);
      });
