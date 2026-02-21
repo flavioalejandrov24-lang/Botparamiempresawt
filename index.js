@@ -28,9 +28,9 @@ const GEMMA_API_URL = "https://oswaldorios24-mi-gemma-servidor.hf.space/pregunta
 const TARGET_GROUP_ID = "120363321342714715@g.us";
  
 const SCHEDULED_TIMES = [
-     { hour: 1, minute: 15 },
-     { hour: 6, minute: 30 },
-     { hour: 4, minute: 10 }
+     { hour: 7, minute: 15 },
+     { hour: 7, minute: 20 },
+     { hour: 7, minute: 40 }
 ];
  
 let messagesSentToday = new Set();
