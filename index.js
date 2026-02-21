@@ -29,11 +29,17 @@ const TARGET_GROUP_ID = "120363321342714715@g.us";
  
 const SCHEDULED_TIMES = [
      { hour: 1, minute: 15 },
-     { hour: 16, minute: 30 },
+     { hour: 2, minute: 15 },
      { hour: 20, minute: 0 }
 ];
  
 let messagesSentToday = new Set();
+
+// ✅ FIX #1: Caché para que WhatsApp pueda reenviar sender keys a miembros del grupo
+const sentMessagesCache = new Map();
+
+// ✅ FIX #2: Variable global para controlar el interval y evitar duplicados al reconectar
+let schedulerInterval = null;
  
 const SCHEDULED_MESSAGE_TEXT = `📢 *¡REGISTRA TU NEGOCIO!* 📢
  
@@ -56,6 +62,12 @@ async function sendScheduledMessage(sock, scheduleTime) {
      
      try {
          const imagePath = './Imagenes/LogotipoEmpresa.png';
+
+         // ✅ FIX #1: Guardamos el texto en caché antes de enviar
+         // Así WhatsApp puede dárselo a miembros del grupo que no lo recibieron
+         const msgId = `sched_${Date.now()}`;
+         sentMessagesCache.set(msgId, SCHEDULED_MESSAGE_TEXT);
+         setTimeout(() => sentMessagesCache.delete(msgId), 10 * 60 * 1000); // limpia en 10 min
          
          if (fs.existsSync(imagePath)) {
              await sock.sendMessage(TARGET_GROUP_ID, {
@@ -77,7 +89,14 @@ async function sendScheduledMessage(sock, scheduleTime) {
 }
  
 function scheduleMessages(sock) {
-     setInterval(() => {
+     // ✅ FIX #2: Limpia el interval anterior antes de crear uno nuevo
+     // Evita que se acumulen múltiples timers con cada reconexión
+     if (schedulerInterval) {
+         clearInterval(schedulerInterval);
+         console.log("🔄 Interval anterior limpiado.");
+     }
+
+     schedulerInterval = setInterval(() => {
          const now = new Date();
          const currentHour = now.getHours();
          const currentMinute = now.getMinutes();
@@ -143,7 +162,7 @@ async function askGemma(mensaje) {
     try {
         const response = await axios.get(GEMMA_API_URL, {
             params: { mensaje },
-            timeout: 30000 // Aumentado a 30 segundos
+            timeout: 30000
         });
         
         return response.data.respuesta || "Lo siento, no pude procesar tu mensaje.";
@@ -352,7 +371,12 @@ async function connectToWhatsApp() {
         printQRInTerminal: false,
         syncFullHistory: false,
         browser: ['Axellabottechnology', 'Chrome', '1.0.0'],
-        getMessage: async () => undefined,
+        // ✅ FIX #1: getMessage ahora devuelve mensajes desde caché
+        // Esto evita que los mensajes lleguen vacíos ("Esperando mensaje...") en grupos
+        getMessage: async (key) => {
+            const cached = sentMessagesCache.get(key.id);
+            return cached ? { conversation: cached } : undefined;
+        },
         markOnlineOnConnect: false,
         emitOwnEvents: false,
         fireInitQueries: false
