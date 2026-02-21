@@ -29,20 +29,28 @@ const TARGET_GROUP_ID = "120363321342714715@g.us";
  
 const SCHEDULED_TIMES = [
      { hour: 1, minute: 15 },
-     { hour: 2, minute: 45 },
+     { hour: 16, minute: 30 },
      { hour: 20, minute: 0 }
 ];
  
 let messagesSentToday = new Set();
 
-// Caché de mensajes enviados - se guarda DESPUÉS de enviar usando el ID real de Baileys
+// Caché de mensajes - se guarda DESPUÉS de enviar usando el ID real de Baileys
 const sentMessagesCache = new Map();
 
 // Variable global del interval para limpiar en reconexiones
 let schedulerInterval = null;
  
-// ✅ Mensaje acortado para evitar problemas de entrega en grupos
-const SCHEDULED_MESSAGE_TEXT = `📢 *¡REGISTRA TU NEGOCIO!* 📢\n\n🔹 Únete a nuestro canal de WhatsApp:\nhttps://whatsapp.com/channel/0029Vb638WkBqbrCCtfqDl3b`;
+// Mensaje programado original completo restaurado
+const SCHEDULED_MESSAGE_TEXT = `📢 *¡REGISTRA TU NEGOCIO!* 📢
+
+🔹 Únete a nuestro canal de WhatsApp:
+https://whatsapp.com/channel/0029Vb638WkBqbrCCtfqDl3b
+
+📝 Ingresa tus datos en nuestro formulario:
+https://docs.google.com/forms/d/e/1FAIpQLScs0piRlqjGgGpTjgErf4qhm1CC87ItHHLf6DvouVydrwq_mQ/viewform?usp=header
+
+✅ ¡Es rápido y sin costo!`;
  
 async function sendScheduledMessage(sock, scheduleTime) {
      const now = new Date();
@@ -68,9 +76,7 @@ async function sendScheduledMessage(sock, scheduleTime) {
              sentMsg = await sock.sendMessage(TARGET_GROUP_ID, { text: SCHEDULED_MESSAGE_TEXT });
          }
 
-         // ✅ CLAVE: Guardamos en caché DESPUÉS de enviar usando el ID REAL que devuelve Baileys
-         // Antes se guardaba con un ID inventado (sched_timestamp) que nunca coincidía
-         // con el ID que WhatsApp pedía al solicitar el reenvío, por eso llegaba vacío
+         // Guardamos en caché con el ID REAL que devuelve Baileys después de enviar
          if (sentMsg?.key?.id) {
              sentMessagesCache.set(sentMsg.key.id, SCHEDULED_MESSAGE_TEXT);
              console.log(`🔑 Mensaje cacheado con ID real: ${sentMsg.key.id}`);
@@ -341,7 +347,7 @@ const MENU_OPTIONS = {
          newState: STATE_CITA
      },
      5: {
-         response: "👤 *Seleccionaste modo asesor personal.*\n\nEnvías tu mensaje y enseguida te responderemos...",
+         response: "👤 *Seleccionaste modo asesor personal.*\n\nEnvía tu mensaje y enseguida te responderemos...",
          newState: STATE_ASESOR_REAL
      }
 };
@@ -367,8 +373,7 @@ async function connectToWhatsApp() {
         printQRInTerminal: false,
         syncFullHistory: false,
         browser: ['Axellabottechnology', 'Chrome', '1.0.0'],
-        // ✅ getMessage ahora devuelve el mensaje desde caché usando el ID REAL
-        // El ID real se guarda después de enviar en sendScheduledMessage
+        // getMessage usa el ID real guardado en caché después de cada envío
         getMessage: async (key) => {
             const cached = sentMessagesCache.get(key.id);
             if (cached) {
@@ -379,9 +384,6 @@ async function connectToWhatsApp() {
         },
         markOnlineOnConnect: false,
         emitOwnEvents: false,
-        // ✅ Se eliminó fireInitQueries: false
-        // Ese flag impedía que Baileys cargara las claves de cifrado de los miembros
-        // del grupo al iniciar, causando que el mensaje llegara en blanco
     });
     
     console.log("✅ Logger configurado - Logs de Baileys → ./baileys_logs.log");
