@@ -29,25 +29,26 @@ const TARGET_GROUP_ID = "120363321342714715@g.us";
  
 const SCHEDULED_TIMES = [
      { hour: 1, minute: 15 },
-     { hour: 07, minute: 30 },
-     { hour: 3, minute: 55 }
+     { hour: 6, minute: 30 },
+     { hour: 4, minute: 10 }
 ];
  
 let messagesSentToday = new Set();
 
-// Caché de mensajes - se guarda DESPUÉS de enviar usando el ID real de Baileys
+// FIX #1: Cache de mensajes enviados indexado por ID REAL
+// Baileys llama a getMessage(key) cuando WhatsApp pide reenviar un mensaje
+// a un miembro del grupo que no lo recibió. El key.id es el ID real asignado
+// por Baileys al momento de enviar, por eso debemos guardarlo DESPUÉS de enviar.
 const sentMessagesCache = new Map();
 
-// Variable global del interval para limpiar en reconexiones
+// FIX #2: Variable global para evitar acumular intervals en cada reconexión
 let schedulerInterval = null;
- 
-// Mensaje programado original completo restaurado
+
+// Mensaje reducido
 const SCHEDULED_MESSAGE_TEXT = `📢 *¡REGISTRA TU NEGOCIO!* 📢
 
 🔹 Únete a nuestro canal de WhatsApp:
-https://whatsapp.com/channel/0029Vb638WkBqbrCCtfqDl3b
-
-✅ ¡Es rápido y sin costo!`;
+https://whatsapp.com/channel/0029Vb638WkBqbrCCtfqDl3b`;
  
 async function sendScheduledMessage(sock, scheduleTime) {
      const now = new Date();
@@ -61,7 +62,7 @@ async function sendScheduledMessage(sock, scheduleTime) {
      try {
          const imagePath = './Imagenes/LogotipoEmpresa.png';
          let sentMsg;
-
+         
          if (fs.existsSync(imagePath)) {
              sentMsg = await sock.sendMessage(TARGET_GROUP_ID, {
                  image: fs.readFileSync(imagePath),
@@ -73,13 +74,14 @@ async function sendScheduledMessage(sock, scheduleTime) {
              sentMsg = await sock.sendMessage(TARGET_GROUP_ID, { text: SCHEDULED_MESSAGE_TEXT });
          }
 
-         // Guardamos en caché con el ID REAL que devuelve Baileys después de enviar
-         if (sentMsg?.key?.id) {
+         // FIX #1: Guardamos con el ID REAL que devuelve sendMessage
+         // Antes el error era guardar con un ID inventado que nunca coincidía
+         if (sentMsg && sentMsg.key && sentMsg.key.id) {
              sentMessagesCache.set(sentMsg.key.id, SCHEDULED_MESSAGE_TEXT);
-             console.log(`🔑 Mensaje cacheado con ID real: ${sentMsg.key.id}`);
              setTimeout(() => sentMessagesCache.delete(sentMsg.key.id), 10 * 60 * 1000);
+             console.log(`🔑 Mensaje cacheado con ID real: ${sentMsg.key.id}`);
          }
- 
+
          messagesSentToday.add(timeKey);
          console.log(`✅ Mensaje enviado a las ${now.toLocaleTimeString()}`);
          
@@ -89,7 +91,7 @@ async function sendScheduledMessage(sock, scheduleTime) {
 }
  
 function scheduleMessages(sock) {
-     // Limpia el interval anterior para evitar timers duplicados en reconexiones
+     // FIX #2: Limpia el interval anterior antes de crear uno nuevo
      if (schedulerInterval) {
          clearInterval(schedulerInterval);
          console.log("🔄 Interval anterior limpiado.");
@@ -370,17 +372,16 @@ async function connectToWhatsApp() {
         printQRInTerminal: false,
         syncFullHistory: false,
         browser: ['Axellabottechnology', 'Chrome', '1.0.0'],
-        // getMessage usa el ID real guardado en caché después de cada envío
+        // FIX #1: getMessage ahora busca por key.id en la caché real
         getMessage: async (key) => {
-            const cached = sentMessagesCache.get(key.id);
-            if (cached) {
-                console.log(`🔄 WhatsApp solicitó reenvío: ${key.id} → entregado desde caché`);
-                return { conversation: cached };
+            if (sentMessagesCache.has(key.id)) {
+                return { conversation: sentMessagesCache.get(key.id) };
             }
             return undefined;
         },
         markOnlineOnConnect: false,
         emitOwnEvents: false,
+        fireInitQueries: false
     });
     
     console.log("✅ Logger configurado - Logs de Baileys → ./baileys_logs.log");
@@ -450,36 +451,25 @@ async function connectToWhatsApp() {
         const normalized = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const remoteNumber = remoteJid.split('@')[0];
  
-        // ============================================================
-        // NUEVO USUARIO - ENVIAR SALUDO INICIAL
-        // ============================================================
         if (currentState === undefined) {
             userStates.set(remoteJid, STATE_WELCOME);
             console.log(`👤 Nuevo usuario: ${remoteNumber}`);
-            
             await sendWelcomeGreeting(sock, remoteJid);
             return;
         }
 
-        // ============================================================
-        // MENU DE BIENVENIDA (CAPA 1)
-        // ============================================================
         if (currentState === STATE_WELCOME) {
             const welcomeMatch = text.trim().match(/^[1-5]$/);
             if (welcomeMatch) {
                 const option = parseInt(welcomeMatch[0]);
                 const selectedOption = WELCOME_OPTIONS[option];
-
                 if (!selectedOption) return;
-
                 if (option === 5) {
                     console.log(`🔄 Usuario [${remoteNumber}] solicitó reenvío de saludo`);
                     await sendWelcomeGreeting(sock, remoteJid);
                     return;
                 }
-
                 userStates.set(remoteJid, selectedOption.newState);
-                
                 try {
                     await sock.sendMessage(remoteJid, { text: selectedOption.response });
                     return;
@@ -490,23 +480,16 @@ async function connectToWhatsApp() {
             }
         }
 
-        // ============================================================
-        // MENU PRINCIPAL (CAPA 2)
-        // ============================================================
         const optionMatch = text.trim().match(/^[0-5]$/);
         if (optionMatch) {
             const option = parseInt(optionMatch[0]);
             const selectedOption = MENU_OPTIONS[option];
-
             if ((currentState === STATE_SUBMENU || currentState === STATE_RECADO || currentState === STATE_CITA || currentState === STATE_ASESOR_REAL) && option !== 0) {
                 await sock.sendMessage(remoteJid, { text: ERROR_INVALID_SUBMENU });
                 return;
             }
-            
             if (!selectedOption) return;
-
             userStates.set(remoteJid, selectedOption.newState);
-             
             try {
                 await sock.sendMessage(remoteJid, { text: selectedOption.response });
                 return;
@@ -516,9 +499,6 @@ async function connectToWhatsApp() {
             }
         }
 
-        // ============================================================
-        // COMANDO /MENU
-        // ============================================================
         if (normalized === "/menú" || normalized === "/menu") {
             await sock.sendMessage(remoteJid, { text: MENU_BIENVENIDA });
             userStates.set(remoteJid, STATE_WELCOME);
@@ -526,18 +506,12 @@ async function connectToWhatsApp() {
             return;
         }
 
-        // ============================================================
-        // ESTADO: RECADO O CITA
-        // ============================================================
         if (currentState === STATE_RECADO || currentState === STATE_CITA) {
-            
             if (text.trim().length > 0) {
                 const isRecado = currentState === STATE_RECADO;
                 const subject = isRecado ? "📝 NUEVO RECADO de Cliente" : "🗓️ NUEVA CITA / REUNIÓN Solicitada";
-                
                 let clientContactNumber = null;
                 const match = text.match(LEON_NUMBER_SEARCH_REGEX);
-                
                 if (match) {
                     clientContactNumber = match[0].trim();
                 } else {
@@ -545,7 +519,6 @@ async function connectToWhatsApp() {
                     cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
                     return;
                 }
-                
                 const body = `
 ==============================================
 TIPO: ${isRecado ? 'RECADO / MENSAJE' : 'CITA / REUNIÓN'}
@@ -557,22 +530,16 @@ CONTACTO DIRECTO (REQUERIDO): ${clientContactNumber}
 CONTENIDO DEL MENSAJE:
 ${text}
 `;
-
                 await sock.sendPresenceUpdate('composing', remoteJid);
-
                 const success = await sendEmail(subject, body);
-                
                 let replyMessage;
-
                 if (success) {
                     replyMessage = "✅ *Mensaje/Cita Enviado con Éxito.*\n\nUn agente lo revisará a la brevedad.\n\n" + MENU_RETURN_PROMPT;
                 } else {
                     replyMessage = "❌ *Error de Sistema.*\n\nOcurrió un error al enviar su solicitud por correo. Por favor, verifique que la información no esté vacía o pulse *0* para volver al menú principal.\n\n" + MENU_RETURN_PROMPT;
                 }
-                
                 userStates.set(remoteJid, STATE_MAIN);
                 await sock.sendMessage(remoteJid, { text: replyMessage });
-                
                 cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
                 await sock.sendPresenceUpdate('available', remoteJid);
                 return;
@@ -582,48 +549,30 @@ ${text}
             }
         }
 
-        // ============================================================
-        // ESTADO: ASESOR REAL (Solo espera)
-        // ============================================================
         if (currentState === STATE_ASESOR_REAL) {
             console.log(`⏳ Usuario [${remoteNumber}] esperando asesor real: "${text}"`);
             return;
         }
 
-        // ============================================================
-        // ESTADO: SUBMENU (No hacer nada)
-        // ============================================================
         if (currentState === STATE_SUBMENU) return;
 
-        // ============================================================
-        // ESTADO: MODO GEMMA (IA)
-        // ============================================================
         if (currentState === STATE_GEMMA_MODE) {
-            
             if (normalized === "/salir" || normalized === "/menu" || normalized === "/menú") {
                 console.log(`🚪 Usuario [${remoteNumber}] SALIÓ del modo Asistente Virtual`);
-                
                 userStates.set(remoteJid, STATE_WELCOME);
                 chatHistory.delete(remoteJid);
-                
                 await sock.sendMessage(remoteJid, {
                     text: "✅ Has salido del modo IA.\n\n" + MENU_BIENVENIDA
                 });
                 cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
                 return;
             }
-
             console.log(`📩 Gemma procesando [${remoteNumber}]: "${text}"`);
-
             try {
                 await sock.sendPresenceUpdate('composing', remoteJid);
-                
                 const reply = await askGemma(text);
-
                 const finalReply = `${reply}\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n💡 *Recuerda:* Este solo es un asistente virtual. Si deseas terminar la conversación solo escribe */salir*`;
-                
                 await sock.sendMessage(remoteJid, { text: finalReply });
-                
                 cooldowns.set(remoteJid, Date.now() + COOLDOWN_SECONDS * 1000);
                 await sock.sendPresenceUpdate('available', remoteJid);
             } catch (error) {
