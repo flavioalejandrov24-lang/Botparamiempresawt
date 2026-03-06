@@ -89,7 +89,7 @@ async function sendScheduledMessage(sock, scheduleTime) {
      console.log(`📤 Enviando mensaje programado (${scheduleTime.hour}:${scheduleTime.minute})...`);
      
      try {
-         const imagePath = 'LogotipoEmpresa.png';
+         const imagePath = './Imagenes/LogotipoEmpresa.png';
          let sentMsg;
          
          if (fs.existsSync(imagePath)) {
