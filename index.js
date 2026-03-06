@@ -25,30 +25,59 @@ const GEMMA_API_URL = "https://oswaldorios24-mi-gemma-servidor.hf.space/pregunta
 // SISTEMA DE MENSAJES PROGRAMADOS AUTOMÁTICOS
 // ============================================================
  
+// Grupo original: Ventas León
 const TARGET_GROUP_ID = "120363321342714715@g.us";
+
+// Grupo nuevo: Empleos León GTO
+const TARGET_GROUP_EMPLEOS_ID = "120363347522191441@g.us";
  
 const SCHEDULED_TIMES = [
      { hour: 7, minute: 15 },
      { hour: 7, minute: 20 },
      { hour: 7, minute: 40 }
 ];
+
+// Mensajes adicionales para grupos
+const SCHEDULED_TIMES_FACEBOOK = [
+     { hour: 16, minute: 30,  groupId: TARGET_GROUP_EMPLEOS_ID, key: "empleos-facebook-16:30" },
+     { hour: 15, minute: 50, groupId: TARGET_GROUP_ID,          key: "ventas-facebook-15:50"  }
+];
  
 let messagesSentToday = new Set();
 
-// FIX #1: Cache de mensajes enviados indexado por ID REAL
-// Baileys llama a getMessage(key) cuando WhatsApp pide reenviar un mensaje
-// a un miembro del grupo que no lo recibió. El key.id es el ID real asignado
-// por Baileys al momento de enviar, por eso debemos guardarlo DESPUÉS de enviar.
 const sentMessagesCache = new Map();
 
-// FIX #2: Variable global para evitar acumular intervals en cada reconexión
 let schedulerInterval = null;
 
-// Mensaje reducido
+// Mensaje original (Ventas León 7:15, 7:20, 7:40)
 const SCHEDULED_MESSAGE_TEXT = `📢 *¡REGISTRA TU NEGOCIO!* 📢
 
 🔹 Únete a nuestro canal de WhatsApp:
 https://whatsapp.com/channel/0029Vb638WkBqbrCCtfqDl3b`;
+
+// Mensaje 16:00 → Empleos León GTO
+const FACEBOOK_MESSAGE_EMPLEOS =
+`💺 *RECUERDA QUE CONTAMOS CON MAS DE 12 GRUPOS EN WHATSAPP* 💺
+
+Si buscas algo distinto a ventas , como empleos, retenes , noticias etc.
+
+✅ *SOLO ÚNETE AL CANAL* ✅
+
+𝔾𝕣𝕦𝕡𝕠𝕤 𝕕𝕖 𝕎𝕙𝕒𝕥𝕤𝔸𝕡𝕡 𝕝𝕖ó𝕟 𝔾𝕥𝕠  https://whatsapp.com/channel/0029Vb6Ml1x0gcfBHsUjPs06
+
+Atte: 🅰🅳🅼🅸🅽🅸🆂🆃🆁🅰🅲🅸🅾🅽`;
+ 
+// Mensaje 16:30 → Ventas León
+const FACEBOOK_MESSAGE_VENTAS = 
+ `💺 *RECUERDA QUE CONTAMOS CON MAS DE 12 GRUPOS EN WHATSAPP* 💺
+
+Si buscas algo distinto a ventas , como empleos, retenes , noticias etc.
+
+✅ *SOLO ÚNETE AL CANAL* ✅
+
+𝔾𝕣𝕦𝕡𝕠𝕤 𝕕𝕖 𝕎𝕙𝕒𝕥𝕤𝔸𝕡𝕡 𝕝𝕖ó𝕟 𝔾𝕥𝕠  https://whatsapp.com/channel/0029Vb6Ml1x0gcfBHsUjPs06
+
+Atte: 🅰🅳🅼🅸🅽🅸🆂🆃🆁🅰🅲🅸🅾🅽`;
  
 async function sendScheduledMessage(sock, scheduleTime) {
      const now = new Date();
@@ -60,7 +89,7 @@ async function sendScheduledMessage(sock, scheduleTime) {
      console.log(`📤 Enviando mensaje programado (${scheduleTime.hour}:${scheduleTime.minute})...`);
      
      try {
-         const imagePath = './Imagenes/LogotipoEmpresa.png';
+         const imagePath = 'LogotipoEmpresa.png';
          let sentMsg;
          
          if (fs.existsSync(imagePath)) {
@@ -74,8 +103,6 @@ async function sendScheduledMessage(sock, scheduleTime) {
              sentMsg = await sock.sendMessage(TARGET_GROUP_ID, { text: SCHEDULED_MESSAGE_TEXT });
          }
 
-         // FIX #1: Guardamos con el ID REAL que devuelve sendMessage
-         // Antes el error era guardar con un ID inventado que nunca coincidía
          if (sentMsg && sentMsg.key && sentMsg.key.id) {
              sentMessagesCache.set(sentMsg.key.id, SCHEDULED_MESSAGE_TEXT);
              setTimeout(() => sentMessagesCache.delete(sentMsg.key.id), 10 * 60 * 1000);
@@ -89,9 +116,39 @@ async function sendScheduledMessage(sock, scheduleTime) {
          console.error("❌ Error al enviar mensaje programado:", error.message);
      }
 }
+
+// Nueva función para los mensajes de Facebook (16:00 y 16:30)
+async function sendFacebookMessage(sock, schedule) {
+     const now = new Date();
+     const todayKey = now.toDateString();
+     const timeKey = `${todayKey}-${schedule.key}`;
+
+     if (messagesSentToday.has(timeKey)) return;
+
+     const messageText = schedule.groupId === TARGET_GROUP_EMPLEOS_ID
+         ? FACEBOOK_MESSAGE_EMPLEOS
+         : FACEBOOK_MESSAGE_VENTAS;
+
+     console.log(`📤 Enviando mensaje Facebook programado (${schedule.hour}:${schedule.minute}) al grupo ${schedule.groupId}...`);
+
+     try {
+         const sentMsg = await sock.sendMessage(schedule.groupId, { text: messageText });
+
+         if (sentMsg && sentMsg.key && sentMsg.key.id) {
+             sentMessagesCache.set(sentMsg.key.id, messageText);
+             setTimeout(() => sentMessagesCache.delete(sentMsg.key.id), 10 * 60 * 1000);
+             console.log(`🔑 Mensaje Facebook cacheado con ID real: ${sentMsg.key.id}`);
+         }
+
+         messagesSentToday.add(timeKey);
+         console.log(`✅ Mensaje Facebook enviado a las ${now.toLocaleTimeString()} al grupo ${schedule.groupId}`);
+
+     } catch (error) {
+         console.error("❌ Error al enviar mensaje Facebook programado:", error.message);
+     }
+}
  
 function scheduleMessages(sock) {
-     // FIX #2: Limpia el interval anterior antes de crear uno nuevo
      if (schedulerInterval) {
          clearInterval(schedulerInterval);
          console.log("🔄 Interval anterior limpiado.");
@@ -102,9 +159,17 @@ function scheduleMessages(sock) {
          const currentHour = now.getHours();
          const currentMinute = now.getMinutes();
          
+         // Mensajes originales Ventas León (7:15, 7:20, 7:40)
          SCHEDULED_TIMES.forEach(scheduleTime => {
              if (currentHour === scheduleTime.hour && currentMinute === scheduleTime.minute) {
                  sendScheduledMessage(sock, scheduleTime);
+             }
+         });
+
+         // Mensajes nuevos de Facebook (16:00 Empleos, 16:30 Ventas)
+         SCHEDULED_TIMES_FACEBOOK.forEach(schedule => {
+             if (currentHour === schedule.hour && currentMinute === schedule.minute) {
+                 sendFacebookMessage(sock, schedule);
              }
          });
          
@@ -117,9 +182,14 @@ function scheduleMessages(sock) {
  
      console.log("⏰ Mensajes programados activos en los siguientes horarios:");
      console.log(`🕐 Hora del servidor: ${new Date().toLocaleString('es-MX')}`);
- 
+
+     console.log("  📌 Grupo Ventas León:");
      SCHEDULED_TIMES.forEach(time => {
          console.log(`     📅 ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')} hrs`);
+     });
+     console.log("  📌 Mensajes Facebook:");
+     SCHEDULED_TIMES_FACEBOOK.forEach(s => {
+         console.log(`     📅 ${s.hour.toString().padStart(2, '0')}:${s.minute.toString().padStart(2, '0')} hrs → ${s.groupId}`);
      });
 }
  
@@ -372,7 +442,6 @@ async function connectToWhatsApp() {
         printQRInTerminal: false,
         syncFullHistory: false,
         browser: ['Axellabottechnology', 'Chrome', '1.0.0'],
-        // FIX #1: getMessage ahora busca por key.id en la caché real
         getMessage: async (key) => {
             if (sentMessagesCache.has(key.id)) {
                 return { conversation: sentMessagesCache.get(key.id) };
