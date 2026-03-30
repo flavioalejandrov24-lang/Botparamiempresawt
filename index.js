@@ -379,7 +379,7 @@ const WELCOME_OPTIONS = {
      },
      4: {
          response: "🌐 *Visita nuestra página web:*\n\n" +
-                   "https://compualextech24.github.io/innovaaxeltechweb/\n\n" +
+                   "https://termuxcommunity.com/\n\n" +
                    "Descubre todos nuestros servicios y proyectos.\n\n" +
                    "↩️ Pulse *0* para regresar.",
          newState: STATE_SUBMENU
