@@ -653,3 +653,4 @@ ${text}
 }
 
 connectToWhatsApp().catch(err => console.error("Error Crítico:", err));
+...
